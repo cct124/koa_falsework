@@ -22,8 +22,7 @@ const logConfig = {
   categories: {
     default: { appenders: ["app", "errors", "console"], level: 'DEBUG' },
     console: { appenders: ["app", "console"], level: 'INFO' },
-    http: { appenders: ["access"], level: 'INFO' },
-    ResErr: { appenders: ["access", "errors"], level: 'ERROR' },
+    http: { appenders: ["access"], level: 'INFO' }
   }
 }
 

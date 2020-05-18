@@ -13,7 +13,6 @@ if (process.env.NODE_ENV === 'development') {
 
 log4js.configure(logConfig);
 const httpLog = log4js.getLogger('http');
-const resErrLog = log4js.getLogger('ResErr');
 const log = getLogger();
 
 /**
@@ -88,13 +87,13 @@ function getLogger(category) {
 }
 
 /**
- * @desc Access 日记记录
- * @param {Object} res - koa的response对象 
+ * @desc http 日记记录
+ * @param {Object} res - koa的response对象
  * @param {String} category - 日志分类
  * @return 返回 log 实例
  */
-function logAccess(res, info) {
-  httpLog[getHttpLevel(res.status)](info);
+function logHttp(ctx) {
+  return `${getClientIP(ctx.req)} - ${ctx.resTime} ${ctx.request.method} ${ctx.request.url} ${ctx.response.status}${(ctx.body && ctx.body.code && ctx.body.code !== API.RES_SUC) ? ' - ' + ctx.body.code + ' ' + ctx.body.msg : ''} - ${ctx.request.header.host} ${ctx.request.header['user-agent']}`;
 }
 
 /**
@@ -157,14 +156,27 @@ async function log4JsMidd(ctx, next) {
   try {
     ctx.resStartTime = new Date();
     await next();
-    ctx.resEndTime = new Date();
-    const resTime = ctx.resEndTime - ctx.resStartTime;
-    logAccess(ctx.response, `${getClientIP(ctx.req)} - ${resTime} ${ctx.request.method} ${ctx.request.url} ${ctx.response.status} - ${ctx.request.header.host} ${ctx.request.header['user-agent']}`);
+    logAccess(ctx);
   } catch (err) {
     ctx.status = 500;
     ctx.body = "server error";
-    logAccess(ctx.response, `${getClientIP(ctx.req)} - ${ctx.request.method} ${ctx.request.url} ${ctx.response.status} - ${ctx.request.header.host} ${ctx.request.header['user-agent']}`);
+    logAccess(ctx);
     log.error('server error', err);
+  }
+}
+
+/**
+ * @desc 记录http请求
+ * @param {Object} ctx - koa的ctx对象
+ */
+function logAccess(ctx) {
+  const res = ctx.response;
+  ctx.resEndTime = new Date();
+  ctx.resTime = ctx.resEndTime - ctx.resStartTime;
+  if (ctx.body && ctx.body.code && ctx.body.code !== API.RES_SUC) {
+    httpLog.error(logHttp(ctx))
+  } else {
+    httpLog[getHttpLevel(res.status)](logHttp(ctx));
   }
 }
 
@@ -192,7 +204,7 @@ async function inteMidd(ctx, next) {
  * @constructor { ctx: Object [koa的ctx对象], code: Number [api状态码], data: any [返回的数据], msg: String [返回的消息] }
  */
 class Res {
-  constructor({ ctx, code = null, data = null, msg = null }) {
+  constructor(ctx, { code = null, data = null, msg = null }) {
     this.ctx = ctx;
     this.code = code;
     this.data = data;
@@ -234,4 +246,4 @@ class Res {
 
 }
 
-module.exports = { getClientIP, useKoaMid, logAccess, getLogger, getHttpLevel, getRouConfig, inteMidd, log4JsMidd }
+module.exports = { getClientIP, useKoaMid, logHttp, getLogger, getHttpLevel, getRouConfig, inteMidd, log4JsMidd, Res }

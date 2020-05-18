@@ -1,4 +1,5 @@
-import { request, summary, body, tags, middlewares, path, description } from 'koa-swagger-decorator';
+import { request, summary, body, tags, middlewares, path, description, query } from 'koa-swagger-decorator';
+const { Res } = require('../../plugins/utils');
 
 const tag = tags(['User']);
 
@@ -20,7 +21,7 @@ export default class UserRouter {
   @middlewares([logTime()])
   @body(userSchema)
   static async register(ctx) {
-    console.log(ctx);
+    console.log(ctx.request.body);
     const { name } = ctx.validatedBody;
     const user = { name };
     ctx.body = { user };
@@ -42,8 +43,11 @@ export default class UserRouter {
   @tag
   static async getAll(ctx) {
     const users = [{ name: 'foo' }, { name: 'bar' }];
-    let user = abc;
-    ctx.body = { users };
+    ctx.body = {
+      code: 2001,
+      data: null,
+      msg: '参数错误',
+    };
   }
 
   @request('get', '/user/{id}')
@@ -65,5 +69,21 @@ export default class UserRouter {
     const { id } = ctx.validatedParams;
     console.log('id:', id);
     ctx.body = { msg: 'success' };
+  }
+
+  @request('get', '/userList')
+  @summary('查询用户列表')
+  @description('查询用户列表传入参数获取用户列表')
+  @tag
+  @query({
+    id: { type: 'string', description: '用户id', required: true }
+  })
+  static async getUserList(ctx) {
+    const { id } = ctx.request.query;
+    new Res(ctx, {
+      code: 2000,
+      data: id,
+      msg: '获取数据成功'
+    }).res();
   }
 }
