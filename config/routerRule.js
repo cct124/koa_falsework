@@ -4,6 +4,11 @@ module.exports = {
   // disable 是否禁止访问
   // frequency 限制api的访问频率
   admin: {
+    frequency: {
+      time: 60 * 1000,
+      value: 60,
+      met: 'ALL'
+    },
     open: true,
     disable: false,
     childPaht: {
