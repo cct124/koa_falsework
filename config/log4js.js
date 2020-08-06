@@ -3,7 +3,7 @@ const logConfig = {
     access: {
       type: 'dateFile',
       filename: 'log/access.log',
-      pattern: '-yyyy-MM-dd',
+      pattern: '.yyyy.MM.dd.log',
       daysToKeep: 60,
       category: 'http'
     },

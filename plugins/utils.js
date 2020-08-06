@@ -4,6 +4,12 @@ const log4js = require('log4js');
 const { logConfig, httpLevel } = require('../config/log4js');
 const routerRule = require('../config/routerRule');
 const { API, MSG } = require('../config/message');
+const config = require('../config/server');
+var schedule = require('node-schedule');
+
+// 限制用户访问api的频率
+const frequency = {};
+
 
 if (process.env.NODE_ENV === 'development') {
   deveHandle();
@@ -34,9 +40,10 @@ function prodHandle() {
  * @param {Boolean} bool - true: 禁止访问；false：允许访问
  */
 function swaggerControl(bool) {
-  const routersConfig = getRouConfig('../routers', 'index');
-  for (const iter of routersConfig) {
-    routerRule[iter.parent].childPaht[iter.module.config.swaggerHtmlEndpoint.slice(1)].disable = bool;
+  const swaList = config.swagger;
+  for (const paths of swaList) {
+    const pathArr = paths.slice(1).split('/')
+    routerRule[pathArr[0]].childPaht[pathArr[1]].disable = bool;
   }
 }
 
@@ -55,7 +62,8 @@ function setLog4JsLevel(level) {
  * @param {Object} req - 请求
  */
 function getClientIP(req) {
-  return req.headers['x-forwarded-for'] || // 判断是否有反向代理 IP
+  return req.headers['x-real-ip'] ||
+    req.headers['x-forwarded-for'] || // 判断是否有反向代理 IP
     req.connection.remoteAddress || // 判断 connection 的远程 IP
     req.socket.remoteAddress || // 判断后端的 socket 的 IP
     req.connection.socket.remoteAddress;
@@ -65,7 +73,7 @@ function getClientIP(req) {
  * @desc 载入目录中的中间件
  * @param {Object} param - 传给中间件的参数 
  * @param {String} dire - 存放js文件的目录路径 
- * @param {Array} paths - 传给中间件的参数 
+ * @param {Array} paths - 中间件的文件名
  */
 function useKoaMid(param, dire, paths) {
   paths.map(i => `${dire}/${i}`).map(file => require(resolve(__dirname, file))).forEach(modes => {
@@ -130,21 +138,31 @@ function getRouConfig(path, name) {
  * @param {Object} tables - 规则表
  * @return 返回查询的规则对象
  */
-function getInterRule(paths, tables) {
-  let open = false;
-  let disable = false;
+function getInterRule(ctx, paths, tables) {
+  const def = {
+    open: false,
+    disable: false,
+    frequency: {},
+  };
   let parent = null;
   let child = null;
   let current = null;
+  let pathLevel = [];
+
   for (const [i, path] of Object.entries(paths)) {
+    pathLevel.push(path);
     parent = (current && paths[i - 1]) ? current : null;
-    current = parent ? parent.childPaht[path] : tables[path];
+    if (!parent || parent.hasOwnProperty('childPaht')) current = parent ? parent.childPaht[path] : tables[path];
     child = (current && current.childPaht && paths[i + 1]) ? current.childPaht[paths[i + 1]] : null;
-    open = (current && current.hasOwnProperty('open')) ? current.open : open;
-    disable = (current && current.hasOwnProperty('disable')) ? current.disable : disable;
+    def.open = (current && current.hasOwnProperty('open')) ? current.open : def.open;
+    def.disable = (current && current.hasOwnProperty('disable')) ? current.disable : def.disable;
+    if (current && current.hasOwnProperty('frequency') && (current.frequency.met === 'ALL' || current.frequency.met === ctx.request.method)) {
+      def.frequency = current.frequency;
+      def.frequency.pathLevel = [...pathLevel];
+    };
   }
 
-  return { open, disable }
+  return { ...def }
 }
 
 /**
@@ -158,10 +176,19 @@ async function log4JsMidd(ctx, next) {
     await next();
     logAccess(ctx);
   } catch (err) {
-    ctx.status = 500;
-    ctx.body = "server error";
-    logAccess(ctx);
-    log.error('server error', err);
+    if (err.status === 400) {
+      ctx.status = err.status;
+      new Res(ctx, {
+        msg: `incorrect field: ${err.field} please check again!`
+      }).resErr();
+    } else {
+      ctx.status = 500;
+      new Res(ctx, {
+        msg: `server error`
+      }).resErr();
+      log.error('server error', err);
+    }
+    return logAccess(ctx)
   }
 }
 
@@ -174,7 +201,7 @@ function logAccess(ctx) {
   ctx.resEndTime = new Date();
   ctx.resTime = ctx.resEndTime - ctx.resStartTime;
   if (ctx.body && ctx.body.code && ctx.body.code !== API.RES_SUC) {
-    httpLog.error(logHttp(ctx))
+    httpLog.warn(logHttp(ctx));
   } else {
     httpLog[getHttpLevel(res.status)](logHttp(ctx));
   }
@@ -187,11 +214,39 @@ function logAccess(ctx) {
  */
 async function inteMidd(ctx, next) {
   const paths = ctx.request.path.slice(1).split('/');
-  const rule = getInterRule(paths, routerRule);
+  const rule = getInterRule(ctx, paths, routerRule);
+
+
+  // 限制api访问频率的处理流程
+  if (rule.frequency.time) {
+    const key = `${ctx.request.ip}${rule.frequency.pathLevel.join('')}`;
+    if (frequency[key]) {
+      frequency[key].f++;
+      if (frequency[key].f > rule.frequency.value) {
+        return new Res(ctx, {
+          code: API.SYS_BUSY,
+          msg: 'System Busy'
+        }).resErr();
+      }
+    } else {
+      const date = new Date(new Date().getTime() + rule.frequency.time);
+      frequency[key] = {
+        f: 1,
+        schedule: schedule.scheduleJob(date, function () {
+          delete frequency[key];
+        })
+      }
+    }
+
+  }
 
   if (rule.disable) {
+
+    // 禁止访问的资源
     ctx.status = 404;
-    return ctx.body = 'Not Found';
+    ctx.body = 'Not Found';
+    return;
+
   } else if (!rule.open) {
 
   }
@@ -204,11 +259,12 @@ async function inteMidd(ctx, next) {
  * @constructor { ctx: Object [koa的ctx对象], code: Number [api状态码], data: any [返回的数据], msg: String [返回的消息] }
  */
 class Res {
-  constructor(ctx, { code = null, data = null, msg = null }) {
+  constructor(ctx, { code = null, data = null, msg = null, err = null }) {
     this.ctx = ctx;
     this.code = code;
     this.data = data;
     this.msg = msg;
+    this.err = err;
   }
 
   /**
@@ -220,6 +276,8 @@ class Res {
       data: this.data,
       msg: this.msg || MSG.DB_ERR,
     };
+    if (this.err) log.error(`database error`, this.err);
+
   }
 
   /**
@@ -231,6 +289,7 @@ class Res {
       data: this.data,
       msg: this.msg,
     };
+    if (this.err) log.error(`responses error`, this.err);
   }
 
   /**
@@ -246,4 +305,4 @@ class Res {
 
 }
 
-module.exports = { getClientIP, useKoaMid, logHttp, getLogger, getHttpLevel, getRouConfig, inteMidd, log4JsMidd, Res }
+module.exports = { getClientIP, useKoaMid, logHttp, getLogger, getHttpLevel, inteMidd, log4JsMidd, Res }
