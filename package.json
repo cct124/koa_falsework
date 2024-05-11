@@ -1,15 +1,28 @@
 {
-  "name": "Koa_sca",
+  "name": "koa_falsework",
   "version": "1.0.0",
+  "private": true,
   "description": "",
-  "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "server": "cross-env NODE_ENV=development babel-node --inspect app.js",
+    "start": "cross-env NODE_ENV=production babel-node app.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "koa": "^2.11.0"
+    "koa": "^2.11.0",
+    "koa-body": "^4.1.1",
+    "koa-swagger-decorator": "^1.6.4",
+    "log4js": "^6.2.1",
+    "node-schedule": "^1.3.2"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.8.4",
+    "@babel/core": "^7.9.0",
+    "@babel/node": "^7.8.7",
+    "@babel/plugin-proposal-decorators": "^7.8.3",
+    "@babel/preset-env": "^7.9.0",
+    "cross-env": "^7.0.2"
   }
 }
